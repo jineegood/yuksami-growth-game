@@ -18,7 +18,7 @@ import {
   getSkillUpgradeCost,
 } from './utils/formulas';
 import { gradeQuizSession } from './utils/quiz';
-import { exportGame, importGame, loadGame, normalizeGameState, resetGame, saveGame } from './utils/storage';
+import { decodeGameCode, exportGame, importGame, loadGame, resetGame, saveGame } from './utils/storage';
 
 const tabs: Array<{ id: ActiveTab; label: string }> = [
   { id: 'character', label: '캐릭터' },
@@ -31,6 +31,7 @@ export default function App() {
   const [state, setState] = useState<GameState>(() => loadGame());
   const [activeTab, setActiveTab] = useState<ActiveTab>('character');
   const [friendBattle, setFriendBattle] = useState<GameState | null>(null);
+  const [levelUpCelebration, setLevelUpCelebration] = useState(false);
   const runtime = useGameLoop({ state, setState, isPaused: Boolean(friendBattle) });
   const stats = useMemo(() => calculateStats(state), [state]);
 
@@ -79,6 +80,10 @@ export default function App() {
 
     const result = gradeQuizSession(state.pendingLevelUp.quiz, answers);
     setState((previous) => applyLevelUpQuizResult(previous, result.passed));
+    if (result.passed) {
+      setLevelUpCelebration(true);
+      window.setTimeout(() => setLevelUpCelebration(false), 1800);
+    }
   };
 
   const resetSave = () => {
@@ -112,7 +117,7 @@ export default function App() {
 
   const startFriendBattle = (code: string) => {
     try {
-      const friend = normalizeGameState(JSON.parse(code));
+      const friend = decodeGameCode(code);
       setFriendBattle(friend);
       return { ok: true, message: '친구와 싸우기를 시작합니다.' };
     } catch {
@@ -166,6 +171,11 @@ export default function App() {
       </div>
 
       {state.pendingLevelUp && <QuizModal pending={state.pendingLevelUp} onSubmit={submitQuiz} />}
+      {levelUpCelebration && (
+        <div className="level-up-celebration" aria-live="polite">
+          <span>레벨업!</span>
+        </div>
+      )}
       {friendBattle && <FriendBattleModal mine={state} friend={friendBattle} onClose={() => setFriendBattle(null)} />}
     </main>
   );

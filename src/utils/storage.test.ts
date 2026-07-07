@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDefaultGameState } from './formulas';
-import { exportGame, importGame, loadGame, resetGame, saveGame } from './storage';
+import { decodeGameCode, exportGame, importGame, loadGame, resetGame, saveGame } from './storage';
 
 describe('storage', () => {
   it('loads a default game when storage is empty', () => {
@@ -31,7 +31,7 @@ describe('storage', () => {
     const result = importGame('{ bad json', makeStorage());
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('불러오기');
+    expect(result.error).toContain('코드');
   });
 
   it('exports importable JSON and reset removes the saved key', () => {
@@ -45,6 +45,31 @@ describe('storage', () => {
     expect(imported.ok).toBe(true);
     resetGame(storage);
     expect(loadGame(storage).player.level).toBe(1);
+  });
+
+  it('exports an opaque character code without readable save numbers', () => {
+    const state = createDefaultGameState();
+    state.player.level = 12;
+    state.player.gold = 98765;
+
+    const exported = exportGame(state);
+
+    expect(exported.startsWith('YSK1-')).toBe(true);
+    expect(exported).not.toContain('"level"');
+    expect(exported).not.toContain('98765');
+    expect(decodeGameCode(exported).player.level).toBe(12);
+  });
+
+  it('rejects a character code when its contents are edited', () => {
+    const state = createDefaultGameState();
+    state.player.level = 8;
+    const exported = exportGame(state);
+    const tampered = `${exported.slice(0, -1)}${exported.endsWith('a') ? 'b' : 'a'}`;
+
+    const result = importGame(tampered, makeStorage());
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('코드');
   });
 
   it('normalizes old saves into the simplified equipment and skill set', () => {

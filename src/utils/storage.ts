@@ -13,6 +13,8 @@ export const SAVE_KEY = 'yuksami-growth-save-v1';
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = ['weapon', 'armor', 'gloves', 'ring'];
 const SKILL_IDS: SkillId[] = ['powerSlash', 'spinCut', 'heal'];
+const EXPORT_PREFIX = 'YSK1-';
+const EXPORT_SECRET = 'yuksami-growth-game-character-code-v1';
 
 export function loadGame(storage = getBrowserStorage()): GameState {
   const fallback = createDefaultGameState();
@@ -49,28 +51,53 @@ export function resetGame(storage = getBrowserStorage()): void {
 }
 
 export function exportGame(state: GameState): string {
-  return JSON.stringify(
-    {
-      ...state,
-      lastSavedAt: Date.now(),
-    },
-    null,
-    2,
-  );
+  return encodeGameCode({
+    ...state,
+    lastSavedAt: Date.now(),
+  });
 }
 
 export function importGame(text: string, storage = getBrowserStorage()): ImportResult {
   try {
-    const parsed = JSON.parse(text);
-    const state = normalizeGameState(parsed);
+    const state = decodeGameCode(text);
     saveGame(state, storage);
     return { ok: true, state };
   } catch {
     return {
       ok: false,
-      error: '불러오기 실패: 저장 데이터 형식이 올바르지 않습니다.',
+      error: '캐릭터 코드가 올바르지 않습니다.',
     };
   }
+}
+
+export function decodeGameCode(text: string): GameState {
+  const trimmed = text.trim();
+
+  // Old exported JSON remains importable so existing saved codes do not break.
+  if (trimmed.startsWith('{')) {
+    return normalizeGameState(JSON.parse(trimmed));
+  }
+
+  if (!trimmed.startsWith(EXPORT_PREFIX)) {
+    throw new Error('Invalid character code');
+  }
+
+  const body = trimmed.slice(EXPORT_PREFIX.length);
+  const [payload, signature, extra] = body.split('.');
+  if (!payload || !signature || extra !== undefined) {
+    throw new Error('Invalid character code');
+  }
+
+  if (signature !== signPayload(payload)) {
+    throw new Error('Edited character code');
+  }
+
+  const envelope = JSON.parse(decodeBase64Url(payload));
+  if (!isRecord(envelope) || envelope.v !== 1 || !isRecord(envelope.data)) {
+    throw new Error('Invalid character code payload');
+  }
+
+  return normalizeGameState(envelope.data);
 }
 
 export function normalizeGameState(input: unknown): GameState {
@@ -122,6 +149,47 @@ export function normalizeGameState(input: unknown): GameState {
     pendingLevelUp: normalizePendingLevelUp(input.pendingLevelUp),
     lastSavedAt: readNumber(input.lastSavedAt, Date.now()),
   };
+}
+
+function encodeGameCode(state: GameState): string {
+  const payload = encodeBase64Url(
+    JSON.stringify({
+      v: 1,
+      data: state,
+    }),
+  );
+
+  return `${EXPORT_PREFIX}${payload}.${signPayload(payload)}`;
+}
+
+function signPayload(payload: string): string {
+  let hash = 2166136261;
+  const source = `${payload}.${EXPORT_SECRET}`;
+
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function encodeBase64Url(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/u, '');
+}
+
+function decodeBase64Url(value: string): string {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 function normalizePendingLevelUp(input: unknown): PendingLevelUpState | null {
